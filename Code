@@ -1,0 +1,107 @@
+library("factoextra") 
+library("cluster") 
+library("NbClust") 
+library("clValid")
+library(ISLR)
+library(caret)
+library(ggplot2)
+library(gmodels)
+library(tidyverse)
+
+data(Carseats)
+
+# Checking missing values
+sum(is.na(Carseats))
+
+qplot(x=Age, data = Carseats, geom = 'density',fill=Education)
+
+# Changing categorical attributes to numeric:
+levels(Carseats$ShelveLoc)
+Carseats$ShelveLoc <- ifelse(Carseats$ShelveLoc == "Bad", 1, 
+                      ifelse(Carseats$ShelveLoc == "Medium", 2, 
+                      ifelse(Carseats$ShelveLoc == "Good", 3, 0)))
+
+
+levels(Carseats$Urban)
+Carseats$Urban <- ifelse(Carseats$Urban == "Yes", 1,0)
+
+Carseats_US <- Carseats[Carseats$US == "Yes",]
+Carseats_US <- Carseats_US[,1:10]
+
+# Scale the data:
+Carseats_US_Scaled <- scale(Carseats_US)
+
+# Checking clustering tendency. Hypothesis is Hopkins < 0.5:
+factoextra::get_clust_tendency(Carseats_US_Scaled, n=50 )
+# Hopkins statistics == 0.4, which is marginal but still clusterable
+
+ # determine the optimal number of clusters (k = 3)
+res.nbclust <- NbClust(Carseats_US_Scaled, distance = 'euclidean', min.nc = 2, max.nc = 10, method = "complete", index = "all")
+factoextra::fviz_nbclust(res.nbclust)+theme_minimal()
+
+## Partitioning clustering using K-means
+
+km.res <- kmeans(Carseats_US_Scaled, 2)
+km.res$centers
+factoextra::fviz_cluster(km.res, data = Carseats_US_Scaled, ellipse = T)
+
+
+# Checking the optimal clustering method
+intern <- clValid::clValid(Carseats_US_Scaled, nClust = 2:6, clMethods = c("hierarchical", "kmeans", "pam"), validation = "internal")
+summary(intern)
+# hierarchical clustering with 2 clusters will yield better results.
+
+dist <- dist(Carseats_US_Scaled, method = 'euclidean')
+hc.res <- hclust(dist)
+plot(hc.res, cex=0.6)
+rect.hclust(hc.res, k=2, border = 2:3)
+
+res <- factoextra::hcut(Carseats_US_Scaled, k=2, stand = F)
+# The data distribution between the 2 clusters
+CrossTable(res$cluster, format = 'SPSS')
+# Visualize the tree
+factoextra::fviz_dend(res, rect = TRUE, cex = 0.5)
+
+# Validation using Silhouette index:
+fviz_silhouette(res)
+
+# The Silhouette value is 0.12, which is quite low.
+
+# An attempt with 3 clusters instead of two:
+res2 <- factoextra::hcut(Carseats_US_Scaled, k=3, stand = F)
+# The data distribution between the 2 clusters
+CrossTable(res2$cluster, format = 'SPSS')
+# Visualize the tree
+factoextra::fviz_dend(res2, rect = TRUE, cex = 0.5)
+# Validation using Silhouette index:
+fviz_silhouette(res2)
+# The Silhouette value is 0.8, which is even lower than the 2 cluster model.
+
+# Adding 2 variables of the Cluster outcomes of the hierarchical and kmeans models
+ Carseats_US$ClusterH <- res$cluster
+Carseats_US$ClusterK <- km.res$cluster
+# Checking their distributions
+CrossTable(Carseats_US$ClusterH)
+CrossTable(Carseats_US$ClusterK)
+
+# Turning Urban back into factor for summarising analysis
+Carseats_US$Urban <- ifelse(Carseats_US$Urban==1, "Yes", "No")
+
+# Look at the main features in the actual divided by the 2 clusters
+# Average Proportional Income is: (mean of the cluster / total population mean)
+
+Carseats_US_sum <- Carseats_US %>%
+  group_by(ClusterH) %>%
+  summarise('Average Age' = mean(Age), 
+            'Count' = n(),
+            'Proportion' = paste(round( (n()/258)*100, 2),"%"),
+            'Average Education' = mean(Education), 
+            'Average Sales' = mean(Sales),
+            'Average Income'=mean(Income),
+            'Average Proportional Income'=paste(round((mean(Income)/68.65)*100,2),"%"),
+            'Average Price' = mean(Price),
+            'Average Competition price' = mean(CompPrice),
+            'Average Advertising' = mean(Advertising),
+            'Average Urban' = sum(Urban=="Yes"))
+
+# Cluster 2 is: younger, wealthier, lives outside the city, buys more and receives more advertisment.
